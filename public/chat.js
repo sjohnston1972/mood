@@ -70,13 +70,24 @@ export function mountChat() {
     fab.classList.remove("hidden");
   });
 
+  // Prevent the send button from stealing focus from the input — keeps the
+  // mobile keyboard open across send / streaming response.
+  const sendBtn = form.querySelector("button[type=submit]");
+  if (sendBtn) {
+    const keepFocus = (e) => { e.preventDefault(); };
+    sendBtn.addEventListener("mousedown", keepFocus);
+    sendBtn.addEventListener("touchstart", keepFocus, { passive: false });
+  }
+
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const message = input.value.trim();
     if (!message) return;
     input.value = "";
+    input.focus();
     try { await sendMessage(message); }
     catch (e) { console.error(e); appendMessage("assistant", "Sorry, something went wrong."); }
+    finally { input.focus(); }
   });
 
   sessionId = crypto.randomUUID();
