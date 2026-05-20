@@ -62,9 +62,13 @@ async function sendMessage(message) {
 export function mountChat() {
   fab.addEventListener("click", () => {
     panel.hidden = false;
+    fab.classList.add("hidden");
     setTimeout(() => input.focus(), 50);
   });
-  closeBtn.addEventListener("click", () => { panel.hidden = true; });
+  closeBtn.addEventListener("click", () => {
+    panel.hidden = true;
+    fab.classList.remove("hidden");
+  });
 
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
