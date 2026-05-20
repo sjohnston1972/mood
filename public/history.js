@@ -1,3 +1,5 @@
+import { openChatWithMessage } from "./chat.js";
+
 const METRICS = ["mood", "energy", "anxiety", "sleep"];
 const METRIC_NAMES = { mood: "Mood", energy: "Energy", anxiety: "Anxiety", sleep: "Sleep" };
 const SUB_POS = { mood: "tl", energy: "tr", anxiety: "bl", sleep: "br" };
@@ -129,9 +131,9 @@ async function renderMonth(today) {
   renderCalendarMonth(cal, byDate, viewYear, viewMonth, today);
   monthBody.append(cal);
 
-  const trends = el("div", { class: "chart-wrap" });
-  renderMonthTrends(trends, byDate, viewYear, viewMonth);
-  monthBody.append(trends);
+  const insights = el("div", { class: "insights-wrap" });
+  await renderMonthInsights(insights, byDate, viewYear, viewMonth, today);
+  monthBody.append(insights);
 }
 
 function renderCalendarMonth(cal, byDate, year, month, today) {
@@ -203,136 +205,248 @@ function buildLegend() {
   return wrap;
 }
 
-function renderMonthTrends(chartWrap, byDate, year, month) {
-  const numDays = new Date(year, month + 1, 0).getDate();
-  const days = [];
-  for (let day = 1; day <= numDays; day++) {
-    const k = isoDate(new Date(year, month, day));
-    days.push({ date: k, value: byDate[k] || null });
-  }
-  chartWrap.append(el("h2", {
+async function renderMonthInsights(wrap, byDate, year, month, today) {
+  wrap.append(el("h2", {
     style: "font-size:13px;font-weight:600;margin:18px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;",
-  }, `${MONTHS[month]} ${year}`));
+  }, "Insights"));
 
-  const grid = el("div", { class: "trends-grid" });
+  const stats = computeMonthStats(byDate, year, month, today);
+
+  if (stats.loggedDays === 0) {
+    wrap.append(el("div", { class: "insight-card" },
+      el("div", { class: "insight-title" }, "No entries this month"),
+      el("div", { class: "insight-detail" }, "Log a mood on the Today tab to see insights here."),
+    ));
+    return;
+  }
+
+  let prevStats = null;
+  const prev = new Date(year, month - 1, 1);
+  const prevByDate = await getMonthData(prev.getFullYear(), prev.getMonth()).catch(() => ({}));
+  prevStats = computeMonthStats(prevByDate, prev.getFullYear(), prev.getMonth(), today);
+
+  // Adherence
+  const adhPct = Math.round(stats.adherence * 100);
+  const adherenceCard = el("div", { class: "insight-card" });
+  adherenceCard.append(el("div", { class: "insight-title" }, `Logged ${stats.loggedDays} of ${stats.possibleDays} days · ${adhPct}%`));
+  if (stats.maxStreak >= 2) {
+    adherenceCard.append(el("div", { class: "insight-detail" }, `Longest streak: ${stats.maxStreak} days`));
+  }
+  wrap.append(adherenceCard);
+
+  // Averages with month-over-month diff
+  const avgCard = el("div", { class: "insight-card" });
+  avgCard.append(el("div", { class: "insight-title" }, "Averages"));
+  const avgRow = el("div", { class: "avg-row" });
   for (const m of METRICS) {
-    const values = days.map(d => d.value ? d.value[m] : null);
-    const valid = values.filter(v => v != null);
-    const avg = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
-    let latest = null;
-    for (let i = values.length - 1; i >= 0; i--) { if (values[i] != null) { latest = values[i]; break; } }
-    const hint = m === "anxiety" ? "lower is better" : "higher is better";
-
-    const row = el("div", { class: "trend-row" });
-    const head = el("div", { class: "trend-head" });
-    head.append(el("div", { class: "trend-label", style: `color:${LINE_COLORS[m]}` }, METRIC_NAMES[m]));
-    head.append(el("div", { class: "trend-hint" }, hint));
-    row.append(head);
-
-    row.append(buildSparkline(values, LINE_COLORS[m]));
-
-    const stats = el("div", { class: "trend-stats" });
-    stats.append(el("div", { class: "trend-current" }, latest != null ? String(latest) : "—"));
-    stats.append(el("div", { class: "trend-avg" }, avg != null ? `avg ${avg.toFixed(1)}` : "no data"));
-    row.append(stats);
-
-    grid.append(row);
+    if (stats.avg[m] == null) continue;
+    const cell = el("div", { class: "avg-cell" });
+    cell.append(el("div", { class: "avg-name", style: `color:${LINE_COLORS[m]}` }, METRIC_NAMES[m]));
+    cell.append(el("div", { class: "avg-val" }, stats.avg[m].toFixed(1)));
+    if (prevStats && prevStats.loggedDays >= 3 && prevStats.avg[m] != null) {
+      const diff = stats.avg[m] - prevStats.avg[m];
+      const better = m === "anxiety" ? diff < 0 : diff > 0;
+      let arrow = "→", cls = "avg-diff";
+      if (Math.abs(diff) >= 0.3) {
+        arrow = diff > 0 ? "↑" : "↓";
+        cls += better ? " good" : " bad";
+      }
+      cell.append(el("div", { class: cls }, `${arrow} ${diff > 0 ? "+" : ""}${diff.toFixed(1)}`));
+    }
+    avgRow.append(cell);
   }
-  chartWrap.append(grid);
+  avgCard.append(avgRow);
+  if (prevStats && prevStats.loggedDays >= 3) {
+    avgCard.append(el("div", { class: "insight-detail", style: "margin-top:6px;" }, `Compared to ${MONTHS[prev.getMonth()]}`));
+  }
+  wrap.append(avgCard);
+
+  // Best / hardest day
+  if (stats.loggedDays >= 3) {
+    const card = el("div", { class: "insight-card" });
+    card.append(insightRow("Best day", stats.best));
+    card.append(insightRow("Hardest day", stats.worst));
+    wrap.append(card);
+  }
+
+  // Patterns
+  const patterns = buildPatterns(stats);
+  if (patterns.length > 0) {
+    const card = el("div", { class: "insight-card" });
+    card.append(el("div", { class: "insight-title" }, "What's going on"));
+    const ul = el("ul", { class: "insight-list" });
+    for (const p of patterns) ul.append(el("li", {}, p));
+    card.append(ul);
+    wrap.append(card);
+  }
+
+  // Chat about this
+  if (stats.loggedDays >= 1) {
+    const monthName = `${MONTHS[month]} ${year}`;
+    const btn = el("button", { class: "chat-about-btn", type: "button" }, "💬 Want to chat about this?");
+    btn.addEventListener("click", () => {
+      const opener = buildChatOpener(monthName, stats, patterns);
+      openChatWithMessage(opener);
+    });
+    wrap.append(btn);
+  }
 }
 
-function buildSparkline(values, color) {
-  const svgNS = "http://www.w3.org/2000/svg";
-  const W = 240, H = 44, PAD = 4;
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("class", "trend-spark");
-  svg.setAttribute("preserveAspectRatio", "none");
-
-  for (const v of [1, 3, 5]) {
-    const y = H - PAD - ((v - 1) / 4) * (H - 2 * PAD);
-    const line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", "0"); line.setAttribute("x2", String(W));
-    line.setAttribute("y1", String(y)); line.setAttribute("y2", String(y));
-    line.setAttribute("stroke", "#e0ddd2");
-    line.setAttribute("stroke-width", "0.5");
-    if (v === 3) line.setAttribute("stroke-dasharray", "2,2");
-    svg.append(line);
+function insightRow(label, entry) {
+  const row = el("div", { class: "insight-row" });
+  row.append(el("div", { class: "insight-row-label" }, label));
+  const v = el("div", { class: "insight-row-value" });
+  v.append(el("div", { class: "insight-row-date" }, formatDateShort(entry._date)));
+  const chips = el("div", { class: "score-chips" });
+  for (const m of METRICS) {
+    const chip = el("span", { class: "score-chip" }, `${METRIC_NAMES[m][0]} ${entry[m]}`);
+    const c = metricColor(m, entry[m]);
+    if (c) { chip.style.background = c; chip.style.color = chipTextColor(entry[m], m); }
+    chips.append(chip);
   }
-
-  const denom = Math.max(values.length - 1, 1);
-  const pts = values.map((v, i) => {
-    if (v == null) return null;
-    const x = PAD + (i / denom) * (W - 2 * PAD);
-    const y = H - PAD - ((v - 1) / 4) * (H - 2 * PAD);
-    return { x, y, i };
-  });
-
-  const segments = [];
-  let cur = [];
-  for (const p of pts) {
-    if (p) cur.push(p);
-    else if (cur.length) { segments.push(cur); cur = []; }
-  }
-  if (cur.length) segments.push(cur);
-
-  for (const seg of segments) {
-    if (seg.length < 2) continue;
-    const d = smoothPath(seg) + ` L ${seg[seg.length - 1].x} ${H - PAD} L ${seg[0].x} ${H - PAD} Z`;
-    const path = document.createElementNS(svgNS, "path");
-    path.setAttribute("d", d);
-    path.setAttribute("fill", color);
-    path.setAttribute("fill-opacity", "0.12");
-    svg.append(path);
-  }
-
-  for (const seg of segments) {
-    const path = document.createElementNS(svgNS, "path");
-    path.setAttribute("d", smoothPath(seg));
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke", color);
-    path.setAttribute("stroke-width", "2");
-    path.setAttribute("stroke-linecap", "round");
-    path.setAttribute("stroke-linejoin", "round");
-    svg.append(path);
-  }
-
-  for (const p of pts) {
-    if (!p) continue;
-    const c = document.createElementNS(svgNS, "circle");
-    c.setAttribute("cx", String(p.x)); c.setAttribute("cy", String(p.y));
-    c.setAttribute("r", "1.6"); c.setAttribute("fill", color);
-    svg.append(c);
-  }
-
-  const last = pts.slice().reverse().find(p => p != null);
-  if (last) {
-    const c = document.createElementNS(svgNS, "circle");
-    c.setAttribute("cx", String(last.x)); c.setAttribute("cy", String(last.y));
-    c.setAttribute("r", "3.5"); c.setAttribute("fill", color);
-    c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", "1.5");
-    svg.append(c);
-  }
-  return svg;
+  v.append(chips);
+  row.append(v);
+  return row;
 }
 
-function smoothPath(points) {
-  if (points.length === 0) return "";
-  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-  if (points.length === 2) return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
-  let d = `M ${points[0].x} ${points[0].y}`;
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[i - 1] || points[i];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[i + 2] || points[i + 1];
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+function chipTextColor(v, m) {
+  // Use dark text on light backgrounds (values 2, 3) and light on dark (1, 5)
+  const score = m === "anxiety" ? 6 - v : v;
+  return score >= 4 ? "#fff" : "rgba(0,0,0,0.7)";
+}
+
+function buildPatterns(s) {
+  const out = [];
+  const avg = (arr, k) => arr.length ? arr.reduce((a, b) => a + b[k], 0) / arr.length : null;
+
+  // Within-month trends
+  if (s.firstHalf.length >= 3 && s.secondHalf.length >= 3) {
+    const f = avg(s.firstHalf, "mood"), l = avg(s.secondHalf, "mood");
+    if (Math.abs(l - f) >= 0.5) {
+      out.push(l > f
+        ? `Your mood is on the up — was around ${f.toFixed(1)} earlier in the month, now averaging ${l.toFixed(1)}.`
+        : `Your mood has dipped recently — was ${f.toFixed(1)} earlier on, now ${l.toFixed(1)}.`);
+    }
+    const fA = avg(s.firstHalf, "anxiety"), lA = avg(s.secondHalf, "anxiety");
+    if (Math.abs(lA - fA) >= 0.5) {
+      out.push(lA < fA
+        ? `Your anxiety has been easing — from ${fA.toFixed(1)} early in the month to ${lA.toFixed(1)} more recently.`
+        : `Your anxiety is getting worse — from ${fA.toFixed(1)} early on to ${lA.toFixed(1)} more recently.`);
+    }
+    const fS = avg(s.firstHalf, "sleep"), lS = avg(s.secondHalf, "sleep");
+    if (Math.abs(lS - fS) >= 0.5) {
+      out.push(lS > fS
+        ? `You seem to be sleeping better than at the start of the month (${fS.toFixed(1)} → ${lS.toFixed(1)}).`
+        : `Your sleep has slipped through the month (${fS.toFixed(1)} → ${lS.toFixed(1)}).`);
+    }
+    const fE = avg(s.firstHalf, "energy"), lE = avg(s.secondHalf, "energy");
+    if (Math.abs(lE - fE) >= 0.5) {
+      out.push(lE > fE
+        ? `Your energy has been picking up (${fE.toFixed(1)} → ${lE.toFixed(1)}).`
+        : `Your energy has been waning (${fE.toFixed(1)} → ${lE.toFixed(1)}).`);
+    }
   }
-  return d;
+
+  // Weekend vs weekday
+  if (s.weekend.length >= 2 && s.weekday.length >= 3) {
+    const we = avg(s.weekend, "mood"), wd = avg(s.weekday, "mood");
+    if (Math.abs(we - wd) >= 0.4) {
+      out.push(we > wd
+        ? `Weekends have been brighter than weekdays for you (mood ${we.toFixed(1)} vs ${wd.toFixed(1)}).`
+        : `Weekdays have actually been better than weekends this month (mood ${wd.toFixed(1)} vs ${we.toFixed(1)}).`);
+    }
+    const weA = avg(s.weekend, "anxiety"), wdA = avg(s.weekday, "anxiety");
+    if (Math.abs(weA - wdA) >= 0.5) {
+      out.push(weA < wdA
+        ? `Your anxiety drops at weekends (${weA.toFixed(1)} vs ${wdA.toFixed(1)} on weekdays).`
+        : `Anxiety has been higher at weekends than weekdays (${weA.toFixed(1)} vs ${wdA.toFixed(1)}) — that's unusual, worth a thought.`);
+    }
+  }
+
+  // Sleep → mood / energy
+  if (s.goodSleep.length >= 2 && s.poorSleep.length >= 2) {
+    const g = avg(s.goodSleep, "mood"), p = avg(s.poorSleep, "mood");
+    if (g - p >= 0.5) {
+      out.push(`You feel noticeably better on days you sleep well — mood ${g.toFixed(1)} after good sleep vs ${p.toFixed(1)} after rough nights.`);
+    }
+    const ge = avg(s.goodSleep, "energy"), pe = avg(s.poorSleep, "energy");
+    if (ge - pe >= 0.5) {
+      out.push(`Your energy follows your sleep too: ${ge.toFixed(1)} after good sleep vs ${pe.toFixed(1)} after poor.`);
+    }
+  }
+
+  return out;
+}
+
+function buildChatOpener(monthName, stats, patterns) {
+  const lines = [`I'd like to talk about how I've been doing in ${monthName}.`];
+  if (patterns.length > 0) {
+    lines.push("");
+    lines.push("Some things I've noticed from my entries:");
+    for (const p of patterns) lines.push(`- ${p}`);
+  } else {
+    const a = stats.avg;
+    lines.push("");
+    const summary = METRICS
+      .filter(m => a[m] != null)
+      .map(m => `${m} ${a[m].toFixed(1)}`).join(", ");
+    lines.push(`My averages this month: ${summary}.`);
+  }
+  lines.push("");
+  lines.push("What stands out to you?");
+  return lines.join("\n");
+}
+
+function computeMonthStats(byDate, year, month, today) {
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const cap = (today.getFullYear() === year && today.getMonth() === month) ? today.getDate() : lastDay;
+
+  const entries = [];
+  for (let day = 1; day <= cap; day++) {
+    const date = new Date(year, month, day);
+    const key = isoDate(date);
+    const e = byDate[key];
+    if (e) entries.push({ ...e, _date: date });
+  }
+  const possibleDays = cap;
+  const loggedDays = entries.length;
+
+  const avg = {};
+  for (const m of METRICS) {
+    const vals = entries.map(e => e[m]);
+    avg[m] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }
+
+  let best = null, worst = null;
+  for (const e of entries) {
+    const score = e.mood + e.energy + e.sleep + (6 - e.anxiety);
+    if (best == null || score > best._score) best = { ...e, _score: score };
+    if (worst == null || score < worst._score) worst = { ...e, _score: score };
+  }
+
+  const weekend = entries.filter(e => { const d = e._date.getDay(); return d === 0 || d === 6; });
+  const weekday = entries.filter(e => { const d = e._date.getDay(); return d !== 0 && d !== 6; });
+  const goodSleep = entries.filter(e => e.sleep >= 4);
+  const poorSleep = entries.filter(e => e.sleep <= 2);
+
+  const mid = Math.ceil(possibleDays / 2);
+  const firstHalf = entries.filter(e => e._date.getDate() <= mid);
+  const secondHalf = entries.filter(e => e._date.getDate() > mid);
+
+  let maxStreak = 0, curStreak = 0;
+  for (let day = 1; day <= cap; day++) {
+    const key = isoDate(new Date(year, month, day));
+    if (byDate[key]) { curStreak++; if (curStreak > maxStreak) maxStreak = curStreak; }
+    else curStreak = 0;
+  }
+
+  return { possibleDays, loggedDays, adherence: possibleDays ? loggedDays / possibleDays : 0,
+    avg, best, worst, weekend, weekday, goodSleep, poorSleep, firstHalf, secondHalf, maxStreak };
+}
+
+function formatDateShort(d) {
+  const dayName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()];
+  return `${dayName} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
 }
 
 function generateDemoEntries(first, last) {

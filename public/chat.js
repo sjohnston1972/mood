@@ -59,6 +59,15 @@ async function sendMessage(message) {
   }
 }
 
+export async function openChatWithMessage(message) {
+  if (!panel || !log) return;
+  panel.hidden = false;
+  fab.classList.add("hidden");
+  log.scrollTop = log.scrollHeight;
+  try { await sendMessage(message); }
+  catch (e) { console.error(e); appendMessage("assistant", "Sorry, something went wrong."); }
+}
+
 export function mountChat() {
   fab.addEventListener("click", () => {
     panel.hidden = false;
