@@ -1,11 +1,15 @@
 const METRICS = ["mood", "energy", "anxiety", "sleep"];
-const COLORS = {
-  mood:    { 1: "#e8a08a", 2: "#f4d29a", 3: "#dfead4", 4: "#a8c98a", 5: "#5b8c3f" },
-  energy:  { 1: "#e8a08a", 2: "#f4d29a", 3: "#dfead4", 4: "#a8c98a", 5: "#5b8c3f" },
-  anxiety: { 5: "#e8a08a", 4: "#f4d29a", 3: "#dfead4", 2: "#a8c98a", 1: "#5b8c3f" },
-  sleep:   { 1: "#e8a08a", 2: "#f4d29a", 3: "#dfead4", 4: "#a8c98a", 5: "#5b8c3f" },
-};
-const LINE_COLORS = { mood: "#6c8ead", energy: "#ffd166", anxiety: "#e8a08a", sleep: "#5b8c3f" };
+const METRIC_NAMES = { mood: "Mood", energy: "Energy", anxiety: "Anxiety", sleep: "Sleep" };
+const SUB_POS = { mood: "tl", energy: "tr", anxiety: "bl", sleep: "br" };
+const RAMP = ["#e8a08a", "#f4d29a", "#dfead4", "#a8c98a", "#5b8c3f"]; // worst -> best
+const LINE_COLORS = { mood: "#6c8ead", energy: "#d4a017", anxiety: "#e8a08a", sleep: "#5b8c3f" };
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const WEEKS = 8;
+
+function metricColor(metric, value) {
+  if (value == null) return null;
+  return metric === "anxiety" ? RAMP[5 - value] : RAMP[value - 1];
+}
 
 function el(tag, props = {}, ...children) {
   const e = document.createElement(tag);
@@ -30,76 +34,131 @@ function daysAgo(n) {
   return d;
 }
 
+function startOfWeekMon(d) {
+  const out = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = (out.getDay() + 6) % 7; // 0 = Mon
+  out.setDate(out.getDate() - dow);
+  return out;
+}
+
 export async function mountHistory(root) {
   root.innerHTML = "";
-  root.append(el("h1", { style: "font-size:20px;margin:8px 0 6px;" }, "History"));
+  root.append(el("h1", { style: "font-size:20px;margin:8px 0 12px;" }, "History"));
 
-  const tabsRow = el("div", { class: "tabs-row" });
-  const tabs = METRICS.map(m => {
-    const b = el("button", { class: "history-tab", type: "button" }, m[0].toUpperCase() + m.slice(1));
-    b.dataset.metric = m;
-    return b;
-  });
-  tabs[0].classList.add("on");
-  tabs.forEach(b => tabsRow.append(b));
-  root.append(tabsRow);
-
-  const heatmap = el("div", { class: "heatmap" });
+  const heatmap = el("div", { class: "heatmap-cal" });
   root.append(heatmap);
-  const legend = el("div", { class: "legend" },
-    "Less",
-    el("span", { class: "sq", style: "background:#e8a08a" }),
-    el("span", { class: "sq", style: "background:#f4d29a" }),
-    el("span", { class: "sq", style: "background:#dfead4" }),
-    el("span", { class: "sq", style: "background:#a8c98a" }),
-    el("span", { class: "sq", style: "background:#5b8c3f" }),
-    "More",
-    el("span", { class: "sq empty", style: "background: repeating-linear-gradient(45deg,#e0ddd2,#e0ddd2 2px,#f0ede2 2px,#f0ede2 4px)" }),
-    "No entry",
-  );
-  root.append(legend);
+
+  root.append(buildLegend());
 
   const chartWrap = el("div", { class: "chart-wrap" });
   root.append(chartWrap);
 
-  const from = isoDate(daysAgo(55));
-  const to = isoDate(new Date());
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const oldestMon = startOfWeekMon(new Date(today.getFullYear(), today.getMonth(), today.getDate() - (WEEKS - 1) * 7));
+  const from = isoDate(oldestMon);
+  const to = isoDate(today);
   const res = await fetch(`/api/entries?from=${from}&to=${to}`);
   const entries = res.ok ? await res.json() : [];
   const byDate = Object.fromEntries(entries.map(e => [e.date, e]));
 
-  let activeMetric = "mood";
-  function renderHeatmap() {
-    heatmap.innerHTML = "";
-    const cells = [];
-    for (let i = 55; i >= 0; i--) {
-      const d = daysAgo(i);
-      const k = isoDate(d);
-      const e = byDate[k];
-      const c = el("div", { class: "cell", title: k });
-      if (e) c.style.background = COLORS[activeMetric][e[activeMetric]];
-      else c.classList.add("empty");
-      cells.push(c);
-    }
-    cells.forEach(c => heatmap.append(c));
+  renderCalendarHeatmap(heatmap, byDate, today, oldestMon);
+  renderTrendChart(chartWrap, byDate);
+}
+
+function renderCalendarHeatmap(heatmap, byDate, today, oldestMon) {
+  heatmap.innerHTML = "";
+  const todayKey = isoDate(today);
+
+  for (let row = 0; row < 7; row++) {
+    heatmap.append(el("div", {
+      class: "weekday-label",
+      style: `grid-row:${row + 1};grid-column:1;`,
+    }, WEEKDAYS[row]));
   }
 
-  tabs.forEach(b => b.addEventListener("click", () => {
-    tabs.forEach(t => t.classList.toggle("on", t === b));
-    activeMetric = b.dataset.metric;
-    renderHeatmap();
-  }));
-  renderHeatmap();
+  for (let col = 0; col < WEEKS; col++) {
+    for (let row = 0; row < 7; row++) {
+      const cellDate = new Date(oldestMon);
+      cellDate.setDate(oldestMon.getDate() + col * 7 + row);
+      const key = isoDate(cellDate);
+      const entry = byDate[key];
+      const isFuture = cellDate > today;
+      const isToday = key === todayKey;
 
+      const classes = ["day"];
+      if (!entry) classes.push("empty");
+      if (isFuture) classes.push("future");
+      if (isToday) classes.push("today");
+
+      const titleParts = [key];
+      if (entry) {
+        titleParts.push(`Mood ${entry.mood} · Energy ${entry.energy} · Anxiety ${entry.anxiety} · Sleep ${entry.sleep}`);
+        if (entry.note) titleParts.push(entry.note);
+      } else if (!isFuture) {
+        titleParts.push("(no entry)");
+      }
+
+      const day = el("div", {
+        class: classes.join(" "),
+        style: `grid-row:${row + 1};grid-column:${col + 2};`,
+        title: titleParts.join("\n"),
+      });
+
+      for (const m of METRICS) {
+        const sub = el("div", { class: `sub ${SUB_POS[m]}` });
+        if (entry) sub.style.background = metricColor(m, entry[m]);
+        day.append(sub);
+      }
+      heatmap.append(day);
+    }
+  }
+}
+
+function buildLegend() {
+  const wrap = el("div", { class: "history-legend" });
+
+  const sample = el("div", { class: "legend-day" },
+    el("div", { class: "sub tl" }, "M"),
+    el("div", { class: "sub tr" }, "E"),
+    el("div", { class: "sub bl" }, "A"),
+    el("div", { class: "sub br" }, "S"),
+  );
+  wrap.append(sample);
+
+  const text = el("div", { class: "legend-text" });
+  text.append(el("div", {}, "Each day shows four blocks: Mood, Energy, Anxiety, Sleep."));
+  const rampRow = el("div", { class: "ramp-row" });
+  rampRow.append(el("span", { class: "ramp-label" }, "Worse"));
+  for (const c of RAMP) rampRow.append(el("span", { class: "ramp-sq", style: `background:${c}` }));
+  rampRow.append(el("span", { class: "ramp-label" }, "Better"));
+  text.append(rampRow);
+  text.append(el("div", { class: "legend-note" }, "Higher mood / energy / sleep = greener. Anxiety is inverted: greener = calmer."));
+  wrap.append(text);
+
+  return wrap;
+}
+
+function renderTrendChart(chartWrap, byDate) {
   const last30 = [];
   for (let i = 29; i >= 0; i--) {
     const k = isoDate(daysAgo(i));
     last30.push({ date: k, e: byDate[k] });
   }
+  chartWrap.append(el("h2", { style: "font-size:13px;font-weight:600;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;" }, "Last 30 days"));
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", "0 0 300 120");
   svg.setAttribute("preserveAspectRatio", "none");
+
+  for (let v = 1; v <= 5; v++) {
+    const y = 120 - ((v - 1) / 4) * 100 - 10;
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", "0"); line.setAttribute("x2", "300");
+    line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("stroke", "#e0ddd2"); line.setAttribute("stroke-width", "0.5");
+    svg.append(line);
+  }
+
   function points(metric) {
     return last30.map((d, i) => {
       if (!d.e) return null;
@@ -115,13 +174,12 @@ export async function mountHistory(root) {
     poly.setAttribute("stroke", LINE_COLORS[m]);
     poly.setAttribute("stroke-width", "2");
     poly.setAttribute("points", points(m));
-    poly.setAttribute("data-metric", m);
     svg.append(poly);
   }
   chartWrap.append(svg);
   const chartLegend = el("div", { class: "chart-legend" });
   for (const m of METRICS) {
-    chartLegend.append(el("span", { style: `color:${LINE_COLORS[m]}` }, `━ ${m}`));
+    chartLegend.append(el("span", { style: `color:${LINE_COLORS[m]};font-weight:600` }, `● ${METRIC_NAMES[m]}`));
   }
   chartWrap.append(chartLegend);
 }
