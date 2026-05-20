@@ -88,8 +88,29 @@ main#app { padding: 16px 14px 90px; max-width: 480px; margin: 0 auto; }
 .legend-note { font-size: 11px; color: var(--muted); }
 
 .chart-wrap { margin-top: 18px; }
-.chart-wrap svg { width: 100%; height: 140px; display: block; background: var(--card); border-radius: 8px; border: 1px solid var(--line); }
-.chart-legend { font-size: 11px; display: flex; gap: 12px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+.trends-grid { display: flex; flex-direction: column; gap: 8px; }
+.trend-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 56px;
+  gap: 10px;
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.trend-head { display: flex; flex-direction: column; gap: 2px; }
+.trend-label { font-size: 13px; font-weight: 700; }
+.trend-hint { font-size: 10px; color: var(--muted); }
+.trend-spark { width: 100%; height: 44px; display: block; }
+.trend-stats { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.trend-current { font-size: 22px; font-weight: 700; color: var(--ink); }
+.trend-avg { font-size: 10px; color: var(--muted); margin-top: 2px; }
+@media (max-width: 380px) {
+  .trend-row { grid-template-columns: 70px 1fr 44px; gap: 6px; padding: 8px 10px; }
+  .trend-label { font-size: 12px; }
+  .trend-current { font-size: 18px; }
+}
 
 nav#tabs {
   position: fixed; left: 0; right: 0; bottom: 0;

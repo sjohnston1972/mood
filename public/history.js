@@ -176,47 +176,135 @@ function buildLegend() {
 }
 
 function renderTrendChart(chartWrap, byDate) {
-  const last30 = [];
+  const days = [];
   for (let i = 29; i >= 0; i--) {
     const k = isoDate(daysAgo(i));
-    last30.push({ date: k, e: byDate[k] });
+    days.push({ date: k, value: byDate[k] || null });
   }
-  chartWrap.append(el("h2", { style: "font-size:13px;font-weight:600;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;" }, "Last 30 days"));
+  chartWrap.append(el("h2", { style: "font-size:13px;font-weight:600;margin:18px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;" }, "Last 30 days"));
+
+  const grid = el("div", { class: "trends-grid" });
+  for (const m of METRICS) {
+    const values = days.map(d => d.value ? d.value[m] : null);
+    const valid = values.filter(v => v != null);
+    const avg = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+    let latest = null;
+    for (let i = values.length - 1; i >= 0; i--) { if (values[i] != null) { latest = values[i]; break; } }
+    const hint = m === "anxiety" ? "lower is better" : "higher is better";
+
+    const row = el("div", { class: "trend-row" });
+    const head = el("div", { class: "trend-head" });
+    head.append(el("div", { class: "trend-label", style: `color:${LINE_COLORS[m]}` }, METRIC_NAMES[m]));
+    head.append(el("div", { class: "trend-hint" }, hint));
+    row.append(head);
+
+    row.append(buildSparkline(values, LINE_COLORS[m]));
+
+    const stats = el("div", { class: "trend-stats" });
+    stats.append(el("div", { class: "trend-current" }, latest != null ? String(latest) : "—"));
+    stats.append(el("div", { class: "trend-avg" }, avg != null ? `avg ${avg.toFixed(1)}` : "no data"));
+    row.append(stats);
+
+    grid.append(row);
+  }
+  chartWrap.append(grid);
+}
+
+function buildSparkline(values, color) {
   const svgNS = "http://www.w3.org/2000/svg";
+  const W = 240, H = 44, PAD = 4;
   const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", "0 0 300 120");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "trend-spark");
   svg.setAttribute("preserveAspectRatio", "none");
 
-  for (let v = 1; v <= 5; v++) {
-    const y = 120 - ((v - 1) / 4) * 100 - 10;
+  // Reference lines at 1, 3, 5
+  for (const v of [1, 3, 5]) {
+    const y = H - PAD - ((v - 1) / 4) * (H - 2 * PAD);
     const line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", "0"); line.setAttribute("x2", "300");
-    line.setAttribute("y1", y); line.setAttribute("y2", y);
-    line.setAttribute("stroke", "#e0ddd2"); line.setAttribute("stroke-width", "0.5");
+    line.setAttribute("x1", "0"); line.setAttribute("x2", String(W));
+    line.setAttribute("y1", String(y)); line.setAttribute("y2", String(y));
+    line.setAttribute("stroke", "#e0ddd2");
+    line.setAttribute("stroke-width", "0.5");
+    if (v === 3) line.setAttribute("stroke-dasharray", "2,2");
     svg.append(line);
   }
 
-  function points(metric) {
-    return last30.map((d, i) => {
-      if (!d.e) return null;
-      const x = (i / 29) * 300;
-      const v = d.e[metric];
-      const y = 120 - ((v - 1) / 4) * 100 - 10;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).filter(Boolean).join(" ");
+  const pts = values.map((v, i) => {
+    if (v == null) return null;
+    const x = PAD + (i / (values.length - 1)) * (W - 2 * PAD);
+    const y = H - PAD - ((v - 1) / 4) * (H - 2 * PAD);
+    return { x, y, i };
+  });
+
+  // Split into contiguous segments separated by null values
+  const segments = [];
+  let cur = [];
+  for (const p of pts) {
+    if (p) cur.push(p);
+    else if (cur.length) { segments.push(cur); cur = []; }
   }
-  for (const m of METRICS) {
-    const poly = document.createElementNS(svgNS, "polyline");
-    poly.setAttribute("fill", "none");
-    poly.setAttribute("stroke", LINE_COLORS[m]);
-    poly.setAttribute("stroke-width", "2");
-    poly.setAttribute("points", points(m));
-    svg.append(poly);
+  if (cur.length) segments.push(cur);
+
+  // Filled area under each segment
+  for (const seg of segments) {
+    if (seg.length < 2) continue;
+    const d = smoothPath(seg) + ` L ${seg[seg.length - 1].x} ${H - PAD} L ${seg[0].x} ${H - PAD} Z`;
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", color);
+    path.setAttribute("fill-opacity", "0.12");
+    svg.append(path);
   }
-  chartWrap.append(svg);
-  const chartLegend = el("div", { class: "chart-legend" });
-  for (const m of METRICS) {
-    chartLegend.append(el("span", { style: `color:${LINE_COLORS[m]};font-weight:600` }, `● ${METRIC_NAMES[m]}`));
+
+  // Smoothed line on top
+  for (const seg of segments) {
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", smoothPath(seg));
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", color);
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.append(path);
   }
-  chartWrap.append(chartLegend);
+
+  // Small dots on each data point
+  for (const p of pts) {
+    if (!p) continue;
+    const c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("cx", String(p.x)); c.setAttribute("cy", String(p.y));
+    c.setAttribute("r", "1.6"); c.setAttribute("fill", color);
+    svg.append(c);
+  }
+
+  // Highlight latest non-null point
+  const last = pts.slice().reverse().find(p => p != null);
+  if (last) {
+    const c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("cx", String(last.x)); c.setAttribute("cy", String(last.y));
+    c.setAttribute("r", "3.5"); c.setAttribute("fill", color);
+    c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", "1.5");
+    svg.append(c);
+  }
+  return svg;
+}
+
+function smoothPath(points) {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  if (points.length === 2) return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] || points[i + 1];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
 }
