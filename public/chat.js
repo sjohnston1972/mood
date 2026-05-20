@@ -70,13 +70,11 @@ export function mountChat() {
     fab.classList.remove("hidden");
   });
 
-  // Prevent the send button from stealing focus from the input — keeps the
-  // mobile keyboard open across send / streaming response.
+  // Prevent the send button from stealing focus from the input on desktop.
+  // (Don't preventDefault touchstart — that also cancels the click on mobile.)
   const sendBtn = form.querySelector("button[type=submit]");
   if (sendBtn) {
-    const keepFocus = (e) => { e.preventDefault(); };
-    sendBtn.addEventListener("mousedown", keepFocus);
-    sendBtn.addEventListener("touchstart", keepFocus, { passive: false });
+    sendBtn.addEventListener("mousedown", (e) => e.preventDefault());
   }
 
   form.addEventListener("submit", async (ev) => {
