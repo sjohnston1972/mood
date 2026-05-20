@@ -25,5 +25,5 @@ ACCESS_TEAM_DOMAIN = "REPLACE_WITH_<team>.cloudflareaccess.com"
 ACCESS_AUD = "REPLACE_WITH_APPLICATION_AUD"
 
 [[routes]]
-pattern = "mood.clydeford.net/*"
+pattern = "mood.clydeford.net"
 custom_domain = true
