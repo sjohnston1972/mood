@@ -91,7 +91,15 @@ nav#tabs .tab.active { background: var(--card); color: var(--ink); border: 1px s
 }
 #chat-panel header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
 #chat-panel h2 { margin: 0; font-size: 13px; font-weight: 600; }
-#chat-close { margin-left: auto; background: none; border: none; font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; padding: 0 4px; }
+#chat-panel[hidden] { display: none !important; }
+#chat-close {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  width: 32px; height: 32px; min-width: 32px; min-height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 22px; line-height: 1; color: var(--muted);
+  border-radius: 6px; padding: 0; touch-action: manipulation;
+}
+#chat-close:hover, #chat-close:active { background: #f0ede2; color: var(--ink); }
 #chat-log { list-style: none; margin: 0; padding: 10px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 #chat-log li { padding: 7px 10px; border-radius: 10px; max-width: 85%; font-size: 13px; line-height: 1.35; }
 #chat-log li.user { background: var(--ink); color: var(--bg); align-self: flex-end; }
