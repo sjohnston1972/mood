@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { env } from "cloudflare:test";
 import { runInsightJob, handleGetInsight } from "../src/insight";
 import { applyMigrations, seedEntry } from "./helpers";
 
