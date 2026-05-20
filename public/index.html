@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#f7f5ef" />
+  <title>Mood</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main id="app" aria-live="polite">
+    <section id="view-today" class="view active" hidden></section>
+    <section id="view-history" class="view" hidden></section>
+  </main>
+
+  <nav id="tabs" aria-label="Primary">
+    <button data-view="today" class="tab active">Today</button>
+    <button data-view="history" class="tab">History</button>
+  </nav>
+
+  <button id="chat-fab" aria-label="Open mood companion chat">&#128172;</button>
+
+  <div id="chat-panel" hidden aria-modal="true" role="dialog" aria-labelledby="chat-title">
+    <header>
+      <h2 id="chat-title">Mood companion</h2>
+      <button id="chat-close" aria-label="Close chat">&times;</button>
+    </header>
+    <ol id="chat-log" aria-live="polite"></ol>
+    <form id="chat-form">
+      <input id="chat-input" type="text" autocomplete="off" placeholder="How are you?" required maxlength="4000" />
+      <button type="submit" aria-label="Send">&uarr;</button>
+    </form>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
