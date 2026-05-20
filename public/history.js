@@ -449,11 +449,13 @@ function formatDateShort(d) {
   return `${dayName} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
 }
 
+const DEMO_SEED_OFFSET = Math.floor(Math.random() * 1_000_000);
+
 function generateDemoEntries(first, last) {
   const out = {};
   const d = new Date(first);
   while (d <= last) {
-    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate() + DEMO_SEED_OFFSET;
     const rng = (n) => (((seed * (n + 7) * 9301 + 49297) % 233280) / 233280);
     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
     const wave = Math.sin(seed / 19) * 0.5 + 0.5;
