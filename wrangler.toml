@@ -21,8 +21,8 @@ id = "fba452e26c3841348a5b195951dc645d"
 binding = "AI"
 
 [vars]
-ACCESS_TEAM_DOMAIN = "REPLACE_WITH_<team>.cloudflareaccess.com"
-ACCESS_AUD = "REPLACE_WITH_APPLICATION_AUD"
+ACCESS_TEAM_DOMAIN = "clydeford.cloudflareaccess.com"
+ACCESS_AUD = "a2cabf22b57c29a158f06264da430458f519c589a36166a5a53dc7f685368ec4"
 
 [[routes]]
 pattern = "mood.clydeford.net"
