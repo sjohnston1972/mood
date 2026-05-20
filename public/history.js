@@ -43,7 +43,16 @@ function startOfWeekMon(d) {
 
 export async function mountHistory(root) {
   root.innerHTML = "";
+  const demo = new URLSearchParams(location.search).get("demo") === "1";
+
   root.append(el("h1", { style: "font-size:20px;margin:8px 0 12px;" }, "History"));
+
+  if (demo) {
+    const banner = el("div", {
+      style: "padding:8px 12px;background:#fff8e6;border-left:4px solid var(--accent);border-radius:6px;font-size:12px;margin-bottom:10px;",
+    }, "Demo mode — synthetic data, not from your entries. Remove ?demo=1 to see real history.");
+    root.append(banner);
+  }
 
   const heatmap = el("div", { class: "heatmap-cal" });
   root.append(heatmap);
@@ -55,14 +64,42 @@ export async function mountHistory(root) {
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const oldestMon = startOfWeekMon(new Date(today.getFullYear(), today.getMonth(), today.getDate() - (WEEKS - 1) * 7));
-  const from = isoDate(oldestMon);
-  const to = isoDate(today);
-  const res = await fetch(`/api/entries?from=${from}&to=${to}`);
-  const entries = res.ok ? await res.json() : [];
-  const byDate = Object.fromEntries(entries.map(e => [e.date, e]));
+
+  let byDate;
+  if (demo) {
+    byDate = generateDemoEntries(oldestMon, today);
+  } else {
+    const from = isoDate(oldestMon);
+    const to = isoDate(today);
+    const res = await fetch(`/api/entries?from=${from}&to=${to}`);
+    const entries = res.ok ? await res.json() : [];
+    byDate = Object.fromEntries(entries.map(e => [e.date, e]));
+  }
 
   renderCalendarHeatmap(heatmap, byDate, today, oldestMon);
   renderTrendChart(chartWrap, byDate);
+}
+
+function generateDemoEntries(oldestMon, today) {
+  const out = {};
+  const d = new Date(oldestMon);
+  while (d <= today) {
+    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    const rng = (n) => (((seed * (n + 7) * 9301 + 49297) % 233280) / 233280);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const wave = Math.sin(seed / 19) * 0.5 + 0.5;
+    const clamp = (x) => Math.max(1, Math.min(5, Math.round(x)));
+    const mood = clamp(2 + wave * 2.2 + (isWeekend ? 0.6 : 0) + (rng(1) - 0.5));
+    const energy = clamp(2.5 + wave * 1.6 + (rng(2) - 0.5) * 1.4);
+    const anxiety = clamp(3.8 - wave * 1.8 + (rng(3) - 0.5) * 1.6);
+    const sleep = clamp(3 + wave + (rng(4) - 0.5) * 1.5);
+    const skip = rng(5) < 0.06; // ~6% gap days to show empty pattern
+    if (!skip) {
+      out[isoDate(d)] = { date: isoDate(d), mood, energy, anxiety, sleep, note: null, tz: "Europe/London", created_at: 0, updated_at: 0 };
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
 }
 
 function renderCalendarHeatmap(heatmap, byDate, today, oldestMon) {
