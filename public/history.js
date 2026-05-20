@@ -4,7 +4,7 @@ const SUB_POS = { mood: "tl", energy: "tr", anxiety: "bl", sleep: "br" };
 const RAMP = ["#e8a08a", "#f4d29a", "#dfead4", "#a8c98a", "#5b8c3f"]; // worst -> best
 const LINE_COLORS = { mood: "#6c8ead", energy: "#d4a017", anxiety: "#e8a08a", sleep: "#5b8c3f" };
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const WEEKS = 8;
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function metricColor(metric, value) {
   if (value == null) return null;
@@ -18,7 +18,10 @@ function el(tag, props = {}, ...children) {
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
     else e.setAttribute(k, v);
   }
-  for (const c of children) e.append(c);
+  for (const c of children) {
+    if (c == null || c === false) continue;
+    e.append(c);
+  }
   return e;
 }
 
@@ -29,131 +32,157 @@ function isoDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-function daysAgo(n) {
-  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - n);
-  return d;
-}
+const monthCache = new Map();
+let demo = false;
+let viewYear, viewMonth;
+let monthBody, monthTitle, prevBtn, nextBtn;
 
-function startOfWeekMon(d) {
-  const out = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dow = (out.getDay() + 6) % 7; // 0 = Mon
-  out.setDate(out.getDate() - dow);
-  return out;
+async function getMonthData(year, month) {
+  const cacheKey = `${year}-${month}-${demo ? "d" : "r"}`;
+  if (monthCache.has(cacheKey)) return monthCache.get(cacheKey);
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  let byDate;
+  if (demo) {
+    byDate = generateDemoEntries(first, last);
+  } else {
+    const res = await fetch(`/api/entries?from=${isoDate(first)}&to=${isoDate(last)}`);
+    const entries = res.ok ? await res.json() : [];
+    byDate = Object.fromEntries(entries.map(e => [e.date, e]));
+  }
+  monthCache.set(cacheKey, byDate);
+  return byDate;
 }
 
 export async function mountHistory(root) {
   root.innerHTML = "";
-  const demo = new URLSearchParams(location.search).get("demo") === "1";
+  demo = new URLSearchParams(location.search).get("demo") === "1";
 
-  root.append(el("h1", { style: "font-size:20px;margin:8px 0 12px;" }, "History"));
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  viewYear = today.getFullYear();
+  viewMonth = today.getMonth();
 
   if (demo) {
-    const banner = el("div", {
+    root.append(el("div", {
       style: "padding:8px 12px;background:#fff8e6;border-left:4px solid var(--accent);border-radius:6px;font-size:12px;margin-bottom:10px;",
-    }, "Demo mode — synthetic data, not from your entries. Remove ?demo=1 to see real history.");
-    root.append(banner);
+    }, "Demo mode — synthetic data, not from your entries. Remove ?demo=1 to see real history."));
   }
 
-  const heatmap = el("div", { class: "heatmap-cal" });
-  root.append(heatmap);
+  const header = el("div", { class: "month-header" });
+  prevBtn = el("button", { class: "month-nav", type: "button", "aria-label": "Previous month" }, "‹");
+  nextBtn = el("button", { class: "month-nav", type: "button", "aria-label": "Next month" }, "›");
+  monthTitle = el("div", { class: "month-title" }, "");
+  prevBtn.addEventListener("click", () => navigate(-1));
+  nextBtn.addEventListener("click", () => navigate(1));
+  header.append(prevBtn, monthTitle, nextBtn);
+  root.append(header);
+
+  monthBody = el("div", { class: "month-body" });
+  root.append(monthBody);
 
   root.append(buildLegend());
 
-  const chartWrap = el("div", { class: "chart-wrap" });
-  root.append(chartWrap);
+  attachSwipe(root);
 
+  await renderMonth(today);
+}
+
+function attachSwipe(root) {
+  let sx = null, sy = null, t0 = 0;
+  root.addEventListener("touchstart", (ev) => {
+    if (ev.touches.length !== 1) return;
+    sx = ev.touches[0].clientX; sy = ev.touches[0].clientY; t0 = Date.now();
+  }, { passive: true });
+  root.addEventListener("touchend", (ev) => {
+    if (sx == null) return;
+    const t = ev.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy, dt = Date.now() - t0;
+    sx = sy = null;
+    if (dt > 600) return;                          // too slow
+    if (Math.abs(dx) < 60) return;                 // too short
+    if (Math.abs(dx) < Math.abs(dy) * 1.4) return; // too vertical
+    navigate(dx < 0 ? 1 : -1);
+  }, { passive: true });
+}
+
+async function navigate(delta) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const oldestMon = startOfWeekMon(new Date(today.getFullYear(), today.getMonth(), today.getDate() - (WEEKS - 1) * 7));
-
-  let byDate;
-  if (demo) {
-    byDate = generateDemoEntries(oldestMon, today);
-  } else {
-    const from = isoDate(oldestMon);
-    const to = isoDate(today);
-    const res = await fetch(`/api/entries?from=${from}&to=${to}`);
-    const entries = res.ok ? await res.json() : [];
-    byDate = Object.fromEntries(entries.map(e => [e.date, e]));
-  }
-
-  renderCalendarHeatmap(heatmap, byDate, today, oldestMon);
-  renderTrendChart(chartWrap, byDate);
+  const targetY = today.getFullYear(), targetM = today.getMonth();
+  let y = viewYear, m = viewMonth + delta;
+  while (m < 0) { m += 12; y -= 1; }
+  while (m > 11) { m -= 12; y += 1; }
+  if (y > targetY || (y === targetY && m > targetM)) return; // cap at current month
+  viewYear = y; viewMonth = m;
+  await renderMonth(today);
 }
 
-function generateDemoEntries(oldestMon, today) {
-  const out = {};
-  const d = new Date(oldestMon);
-  while (d <= today) {
-    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-    const rng = (n) => (((seed * (n + 7) * 9301 + 49297) % 233280) / 233280);
-    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-    const wave = Math.sin(seed / 19) * 0.5 + 0.5;
-    const clamp = (x) => Math.max(1, Math.min(5, Math.round(x)));
-    const mood = clamp(2 + wave * 2.2 + (isWeekend ? 0.6 : 0) + (rng(1) - 0.5));
-    const energy = clamp(2.5 + wave * 1.6 + (rng(2) - 0.5) * 1.4);
-    const anxiety = clamp(3.8 - wave * 1.8 + (rng(3) - 0.5) * 1.6);
-    const sleep = clamp(3 + wave + (rng(4) - 0.5) * 1.5);
-    const skip = rng(5) < 0.06; // ~6% gap days to show empty pattern
-    if (!skip) {
-      out[isoDate(d)] = { date: isoDate(d), mood, energy, anxiety, sleep, note: null, tz: "Europe/London", created_at: 0, updated_at: 0 };
-    }
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
+async function renderMonth(today) {
+  monthTitle.textContent = `${MONTHS[viewMonth]} ${viewYear}`;
+  const atCurrent = (viewYear === today.getFullYear() && viewMonth === today.getMonth());
+  nextBtn.disabled = atCurrent;
+  nextBtn.style.opacity = atCurrent ? "0.3" : "1";
+
+  monthBody.innerHTML = "";
+  const byDate = await getMonthData(viewYear, viewMonth);
+
+  const cal = el("div", { class: "month-cal" });
+  renderCalendarMonth(cal, byDate, viewYear, viewMonth, today);
+  monthBody.append(cal);
+
+  const trends = el("div", { class: "chart-wrap" });
+  renderMonthTrends(trends, byDate, viewYear, viewMonth);
+  monthBody.append(trends);
 }
 
-function renderCalendarHeatmap(heatmap, byDate, today, oldestMon) {
-  heatmap.innerHTML = "";
+function renderCalendarMonth(cal, byDate, year, month, today) {
+  for (const w of WEEKDAYS) {
+    cal.append(el("div", { class: "weekday-header" }, w));
+  }
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const numDays = lastDay.getDate();
+  const firstDow = (firstDay.getDay() + 6) % 7; // Mon=0
+
+  for (let i = 0; i < firstDow; i++) cal.append(el("div", { class: "day-blank" }));
+
   const todayKey = isoDate(today);
+  for (let day = 1; day <= numDays; day++) {
+    const date = new Date(year, month, day);
+    const key = isoDate(date);
+    const entry = byDate[key];
+    const isFuture = date > today;
+    const isToday = key === todayKey;
 
-  for (let row = 0; row < 7; row++) {
-    heatmap.append(el("div", {
-      class: "weekday-label",
-      style: `grid-row:${row + 1};grid-column:1;`,
-    }, WEEKDAYS[row]));
-  }
+    const classes = ["day-cell"];
+    if (!entry) classes.push("empty");
+    if (isFuture) classes.push("future");
+    if (isToday) classes.push("today");
 
-  for (let col = 0; col < WEEKS; col++) {
-    for (let row = 0; row < 7; row++) {
-      const cellDate = new Date(oldestMon);
-      cellDate.setDate(oldestMon.getDate() + col * 7 + row);
-      const key = isoDate(cellDate);
-      const entry = byDate[key];
-      const isFuture = cellDate > today;
-      const isToday = key === todayKey;
+    const titleLines = [key];
+    if (entry) {
+      titleLines.push(`Mood ${entry.mood} · Energy ${entry.energy} · Anxiety ${entry.anxiety} · Sleep ${entry.sleep}`);
+      if (entry.note) titleLines.push(entry.note);
+    } else if (!isFuture) titleLines.push("(no entry)");
 
-      const classes = ["day"];
-      if (!entry) classes.push("empty");
-      if (isFuture) classes.push("future");
-      if (isToday) classes.push("today");
-
-      const titleParts = [key];
-      if (entry) {
-        titleParts.push(`Mood ${entry.mood} · Energy ${entry.energy} · Anxiety ${entry.anxiety} · Sleep ${entry.sleep}`);
-        if (entry.note) titleParts.push(entry.note);
-      } else if (!isFuture) {
-        titleParts.push("(no entry)");
-      }
-
-      const day = el("div", {
-        class: classes.join(" "),
-        style: `grid-row:${row + 1};grid-column:${col + 2};`,
-        title: titleParts.join("\n"),
-      });
-
-      for (const m of METRICS) {
-        const sub = el("div", { class: `sub ${SUB_POS[m]}` });
-        if (entry) sub.style.background = metricColor(m, entry[m]);
-        day.append(sub);
-      }
-      heatmap.append(day);
+    const cell = el("div", { class: classes.join(" "), title: titleLines.join("\n") });
+    cell.append(el("div", { class: "day-num" }, String(day)));
+    const blocks = el("div", { class: "day-blocks" });
+    for (const m of METRICS) {
+      const sub = el("div", { class: `sub ${SUB_POS[m]}` });
+      if (entry) sub.style.background = metricColor(m, entry[m]);
+      blocks.append(sub);
     }
+    cell.append(blocks);
+    cal.append(cell);
   }
+
+  const trailing = (7 - ((firstDow + numDays) % 7)) % 7;
+  for (let i = 0; i < trailing; i++) cal.append(el("div", { class: "day-blank" }));
 }
 
 function buildLegend() {
   const wrap = el("div", { class: "history-legend" });
-
   const sample = el("div", { class: "legend-day" },
     el("div", { class: "sub tl" }, "M"),
     el("div", { class: "sub tr" }, "E"),
@@ -171,17 +200,19 @@ function buildLegend() {
   text.append(rampRow);
   text.append(el("div", { class: "legend-note" }, "Higher mood / energy / sleep = greener. Anxiety is inverted: greener = calmer."));
   wrap.append(text);
-
   return wrap;
 }
 
-function renderTrendChart(chartWrap, byDate) {
+function renderMonthTrends(chartWrap, byDate, year, month) {
+  const numDays = new Date(year, month + 1, 0).getDate();
   const days = [];
-  for (let i = 29; i >= 0; i--) {
-    const k = isoDate(daysAgo(i));
+  for (let day = 1; day <= numDays; day++) {
+    const k = isoDate(new Date(year, month, day));
     days.push({ date: k, value: byDate[k] || null });
   }
-  chartWrap.append(el("h2", { style: "font-size:13px;font-weight:600;margin:18px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;" }, "Last 30 days"));
+  chartWrap.append(el("h2", {
+    style: "font-size:13px;font-weight:600;margin:18px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;",
+  }, `${MONTHS[month]} ${year}`));
 
   const grid = el("div", { class: "trends-grid" });
   for (const m of METRICS) {
@@ -218,7 +249,6 @@ function buildSparkline(values, color) {
   svg.setAttribute("class", "trend-spark");
   svg.setAttribute("preserveAspectRatio", "none");
 
-  // Reference lines at 1, 3, 5
   for (const v of [1, 3, 5]) {
     const y = H - PAD - ((v - 1) / 4) * (H - 2 * PAD);
     const line = document.createElementNS(svgNS, "line");
@@ -230,14 +260,14 @@ function buildSparkline(values, color) {
     svg.append(line);
   }
 
+  const denom = Math.max(values.length - 1, 1);
   const pts = values.map((v, i) => {
     if (v == null) return null;
-    const x = PAD + (i / (values.length - 1)) * (W - 2 * PAD);
+    const x = PAD + (i / denom) * (W - 2 * PAD);
     const y = H - PAD - ((v - 1) / 4) * (H - 2 * PAD);
     return { x, y, i };
   });
 
-  // Split into contiguous segments separated by null values
   const segments = [];
   let cur = [];
   for (const p of pts) {
@@ -246,7 +276,6 @@ function buildSparkline(values, color) {
   }
   if (cur.length) segments.push(cur);
 
-  // Filled area under each segment
   for (const seg of segments) {
     if (seg.length < 2) continue;
     const d = smoothPath(seg) + ` L ${seg[seg.length - 1].x} ${H - PAD} L ${seg[0].x} ${H - PAD} Z`;
@@ -257,7 +286,6 @@ function buildSparkline(values, color) {
     svg.append(path);
   }
 
-  // Smoothed line on top
   for (const seg of segments) {
     const path = document.createElementNS(svgNS, "path");
     path.setAttribute("d", smoothPath(seg));
@@ -269,7 +297,6 @@ function buildSparkline(values, color) {
     svg.append(path);
   }
 
-  // Small dots on each data point
   for (const p of pts) {
     if (!p) continue;
     const c = document.createElementNS(svgNS, "circle");
@@ -278,7 +305,6 @@ function buildSparkline(values, color) {
     svg.append(c);
   }
 
-  // Highlight latest non-null point
   const last = pts.slice().reverse().find(p => p != null);
   if (last) {
     const c = document.createElementNS(svgNS, "circle");
@@ -307,4 +333,27 @@ function smoothPath(points) {
     d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
   }
   return d;
+}
+
+function generateDemoEntries(first, last) {
+  const out = {};
+  const d = new Date(first);
+  while (d <= last) {
+    const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    const rng = (n) => (((seed * (n + 7) * 9301 + 49297) % 233280) / 233280);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const wave = Math.sin(seed / 19) * 0.5 + 0.5;
+    const clamp = (x) => Math.max(1, Math.min(5, Math.round(x)));
+    const mood = clamp(2 + wave * 2.2 + (isWeekend ? 0.6 : 0) + (rng(1) - 0.5));
+    const energy = clamp(2.5 + wave * 1.6 + (rng(2) - 0.5) * 1.4);
+    const anxiety = clamp(3.8 - wave * 1.8 + (rng(3) - 0.5) * 1.6);
+    const sleep = clamp(3 + wave + (rng(4) - 0.5) * 1.5);
+    const skip = rng(5) < 0.06;
+    if (!skip) {
+      const k = isoDate(d);
+      out[k] = { date: k, mood, energy, anxiety, sleep, note: null, tz: "Europe/London", created_at: 0, updated_at: 0 };
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
 }
