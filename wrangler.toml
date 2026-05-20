@@ -1,0 +1,29 @@
+name = "mood-tracker"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mood"
+database_id = "REPLACE_WITH_ID_FROM_WRANGLER_D1_CREATE"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_ID_FROM_WRANGLER_KV_CREATE"
+
+[ai]
+binding = "AI"
+
+[vars]
+ACCESS_TEAM_DOMAIN = "REPLACE_WITH_<team>.cloudflareaccess.com"
+ACCESS_AUD = "REPLACE_WITH_APPLICATION_AUD"
+
+[[routes]]
+pattern = "mood.clydeford.net/*"
+custom_domain = true
