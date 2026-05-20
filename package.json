@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --workspace vitest.workspace.ts",
+    "test:watch": "vitest --workspace vitest.workspace.ts",
     "typecheck": "tsc --noEmit",
     "migrate:local": "wrangler d1 migrations apply mood --local",
     "migrate:remote": "wrangler d1 migrations apply mood --remote"
