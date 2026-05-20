@@ -10,12 +10,12 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "mood"
-database_id = "REPLACE_WITH_ID_FROM_WRANGLER_D1_CREATE"
+database_id = "2f3ca975-a2e0-4e54-a614-43a4d981c6ae"
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "REPLACE_WITH_ID_FROM_WRANGLER_KV_CREATE"
+id = "fba452e26c3841348a5b195951dc645d"
 
 [ai]
 binding = "AI"
