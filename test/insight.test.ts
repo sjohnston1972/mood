@@ -14,9 +14,13 @@ function mockAi(response: string) {
   (env as any).AI = { run: vi.fn().mockResolvedValue({ response }) };
 }
 
+// Seed within the 14-day window that runInsightJob reads relative to the real
+// current date, so these tests don't rot as wall-clock time advances.
+const today = new Date().toISOString().slice(0, 10);
+
 describe("runInsightJob", () => {
   it("writes a non-NONE insight to D1 and KV", async () => {
-    await seedEntry(EMAIL, "2026-05-20");
+    await seedEntry(EMAIL, today);
     mockAi("Sleep dipped Wed.");
     await runInsightJob(env, EMAIL);
     const row = await env.DB.prepare("SELECT text FROM insights WHERE email=?").bind(EMAIL).first<{ text: string }>();
@@ -26,12 +30,23 @@ describe("runInsightJob", () => {
   });
 
   it("writes nothing when AI returns NONE", async () => {
-    await seedEntry(EMAIL, "2026-05-20");
+    await seedEntry(EMAIL, today);
     mockAi("NONE");
     await runInsightJob(env, EMAIL);
     const row = await env.DB.prepare("SELECT * FROM insights WHERE email=?").bind(EMAIL).first();
     expect(row).toBeNull();
     expect(await env.KV.get(`insight:${EMAIL}`)).toBeNull();
+  });
+
+  it("preserves the last insight when AI returns NONE", async () => {
+    await seedEntry(EMAIL, today);
+    // A prior insight is cached. Per design, /api/insight shows the latest on next
+    // open, so a NONE result must NOT wipe it.
+    await env.KV.put(`insight:${EMAIL}`, JSON.stringify({ date: "2026-05-19", text: "keep me" }));
+    mockAi("NONE");
+    await runInsightJob(env, EMAIL);
+    const kv = await env.KV.get(`insight:${EMAIL}`, "json") as any;
+    expect(kv?.text).toBe("keep me");
   });
 
   it("no-ops when no entries exist", async () => {

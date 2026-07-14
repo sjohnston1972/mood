@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { handleChat, handleGetChatHistory } from "../src/chat";
+import { CRISIS_MESSAGE } from "../src/safety";
 import { applyMigrations, seedEntry } from "./helpers";
 
 const IDENT = { email: "u@example.com" };
@@ -53,6 +54,33 @@ describe("POST /api/chat", () => {
     ).bind(IDENT.email, "s1").all();
     expect(turns.results.map((r: any) => r.role)).toEqual(["user", "assistant"]);
     expect((turns.results[1] as any).content).toBe("Hi there");
+  });
+
+  it("prepends the crisis card to the client stream and persisted assistant turn", async () => {
+    mockAiStream(["Hi ", "there"]);
+    const ctx = createExecutionContext();
+    const req = new Request("https://x/api/chat", {
+      method: "POST", body: JSON.stringify({ session_id: "s1", message: "I want to kill myself" }),
+    });
+    const res = await handleChat(req, env, IDENT, ctx);
+    expect(res.status).toBe(200);
+    const text = await readAll(res.body!);
+    // First SSE event carries the crisis signpost.
+    const firstEvent = text.split("\n\n")[0];
+    const firstLine = firstEvent.split("\n").find(l => l.startsWith("data: "))!;
+    const firstPayload = JSON.parse(firstLine.slice(6)) as { response: string };
+    expect(firstPayload.response).toContain("116 123");
+    // LLM reply still streams after the card.
+    expect(text).toContain("Hi ");
+    expect(text).toContain("there");
+    await waitOnExecutionContext(ctx);
+    const turns = await env.DB.prepare(
+      "SELECT role, content FROM chat_turns WHERE email=? AND session_id=? ORDER BY id"
+    ).bind(IDENT.email, "s1").all();
+    expect(turns.results.map((r: any) => r.role)).toEqual(["user", "assistant"]);
+    const assistant = (turns.results[1] as any).content as string;
+    expect(assistant.startsWith(CRISIS_MESSAGE)).toBe(true);
+    expect(assistant.endsWith("Hi there")).toBe(true);
   });
 
   it("400s on missing fields", async () => {

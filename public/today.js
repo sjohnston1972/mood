@@ -102,7 +102,8 @@ export async function mountToday(root) {
   });
 
   try {
-    const res = await fetch("/api/entries/today");
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const res = await fetch(`/api/entries/today?tz=${encodeURIComponent(tz)}`);
     if (res.ok) {
       const entry = await res.json();
       if (entry) {

@@ -9,13 +9,17 @@ beforeEach(applyMigrations);
 
 describe("GET /api/entries", () => {
   it("returns the last 60 days by default", async () => {
-    await seedEntry(IDENT.email, "2026-05-20");
-    await seedEntry(IDENT.email, "2026-05-19");
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const yDate = new Date(now); yDate.setUTCDate(now.getUTCDate() - 1);
+    const yesterday = yDate.toISOString().slice(0, 10);
+    await seedEntry(IDENT.email, today);
+    await seedEntry(IDENT.email, yesterday);
     const req = new Request("https://x/api/entries");
     const res = await handleGetEntries(req, env, IDENT);
     expect(res.status).toBe(200);
     const json = await res.json() as any[];
-    expect(json.map(r => r.date)).toEqual(["2026-05-20", "2026-05-19"]);
+    expect(json.map(r => r.date)).toEqual([today, yesterday]);
   });
 
   it("honours from/to", async () => {
@@ -50,6 +54,29 @@ describe("GET /api/entries/today", () => {
     const res = await handleGetTodayEntry(req, env, IDENT);
     expect(res.status).toBe(200);
     expect(await res.json()).toBeNull();
+  });
+
+  it("uses the client tz to resolve the local date", async () => {
+    const dateIn = (tz: string) => new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(new Date());
+    const utcToday = dateIn("UTC");
+    // At any hour, at least one of these extremes has a local date != UTC's.
+    const zone = dateIn("Pacific/Kiritimati") !== utcToday ? "Pacific/Kiritimati" : "Etc/GMT+12";
+    const localDate = dateIn(zone);
+    expect(localDate).not.toBe(utcToday);
+
+    await seedEntry(IDENT.email, localDate, { mood: 7 });
+
+    // Default UTC handler misses the entry saved under the client's local date.
+    const utcRes = await handleGetTodayEntry(new Request("https://x/api/entries/today"), env, IDENT);
+    expect(await utcRes.json()).toBeNull();
+
+    // With the client tz, the local entry is found.
+    const tzReq = new Request(`https://x/api/entries/today?tz=${encodeURIComponent(zone)}`);
+    const tzRes = await handleGetTodayEntry(tzReq, env, IDENT);
+    const json = await tzRes.json() as any;
+    expect(json.mood).toBe(7);
   });
 });
 

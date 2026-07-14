@@ -10,23 +10,26 @@ export const SYSTEM_PROMPT_CHAT = `You are a warm, brief mood companion. The use
 const SYSTEM_PROMPT_INSIGHT = `You are reading 14 days of mood-tracker entries. Write ONE short, kind, specific observation (max 140 characters). If nothing notable, output exactly the word NONE.`;
 
 async function runWithFallback(
-  ai: Ai, messages: ChatMessage[], opts: { stream?: boolean } = {},
+  ai: Ai, messages: ChatMessage[], opts: { stream?: boolean; max_tokens?: number } = {},
 ): Promise<unknown> {
   try {
     return await ai.run(PRIMARY as any, { messages, ...opts });
   } catch {
+    // Known limitation: for streaming calls the fallback only catches errors
+    // thrown BEFORE the stream starts — a mid-stream failure isn't retried.
+    // Documented follow-up, not fixed here.
     return await ai.run(FALLBACK as any, { messages, ...opts });
   }
 }
 
-export async function chatComplete(ai: Ai, messages: ChatMessage[]): Promise<string> {
-  const out = await runWithFallback(ai, messages) as { response?: string };
+export async function chatComplete(ai: Ai, messages: ChatMessage[], maxTokens = 512): Promise<string> {
+  const out = await runWithFallback(ai, messages, { max_tokens: maxTokens }) as { response?: string };
   if (!out || typeof out.response !== "string") throw new Error("AI returned no response");
   return out.response;
 }
 
 export async function streamChat(ai: Ai, messages: ChatMessage[]): Promise<ReadableStream> {
-  const stream = await runWithFallback(ai, messages, { stream: true });
+  const stream = await runWithFallback(ai, messages, { stream: true, max_tokens: 512 });
   return stream as ReadableStream;
 }
 
@@ -38,7 +41,7 @@ export async function generateInsight(ai: Ai, entries: Entry[]): Promise<string 
   const text = await chatComplete(ai, [
     { role: "system", content: SYSTEM_PROMPT_INSIGHT },
     { role: "user", content: JSON.stringify(compact) },
-  ]);
+  ], 80);
   const trimmed = text.trim();
   if (trimmed.toUpperCase() === "NONE" || trimmed === "") return null;
   return trimmed.length > 140 ? trimmed.slice(0, 137).trimEnd() + "..." : trimmed;

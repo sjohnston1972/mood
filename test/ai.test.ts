@@ -64,3 +64,27 @@ describe("streamChat", () => {
     expect(stream).toBeInstanceOf(ReadableStream);
   });
 });
+
+describe("max_tokens cap", () => {
+  it("chatComplete caps at 512 by default", async () => {
+    const ai = makeAi(async () => ({ response: "hi" }));
+    await chatComplete(ai, [{ role: "user", content: "hi" }]);
+    expect((ai.run as any).mock.calls[0][1].max_tokens).toBe(512);
+  });
+
+  it("streamChat caps at 512", async () => {
+    const ai = makeAi(async () => new ReadableStream());
+    await streamChat(ai, [{ role: "user", content: "hi" }]);
+    expect((ai.run as any).mock.calls[0][1].max_tokens).toBe(512);
+  });
+
+  it("generateInsight requests the smaller 80 cap", async () => {
+    const entries = Array.from({ length: 14 }, (_, i) => ({
+      date: `2026-05-${String(i + 1).padStart(2, "0")}`,
+      mood: 3, energy: 3, anxiety: 2, sleep: 3, note: null,
+    }));
+    const ai = makeAi(async () => ({ response: "Sleep dipped Wed-Thu." }));
+    await generateInsight(ai, entries as any);
+    expect((ai.run as any).mock.calls[0][1].max_tokens).toBe(80);
+  });
+});

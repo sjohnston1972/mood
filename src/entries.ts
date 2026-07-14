@@ -17,12 +17,23 @@ function todayInTz(tz: string): string {
   return fmt.format(new Date());
 }
 
+function isValidTz(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function handleGetEntries(req: Request, env: Env, ident: Identity): Promise<Response> {
   const url = new URL(req.url);
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
+  const tzParam = url.searchParams.get("tz");
   try {
-    const today = todayInTz("UTC");
+    const tz = tzParam && isValidTz(tzParam) ? tzParam : "UTC";
+    const today = todayInTz(tz);
     const dToday = new Date(`${today}T00:00:00Z`);
     const defaultFrom = new Date(dToday); defaultFrom.setUTCDate(dToday.getUTCDate() - 60);
     const from = fromParam ? parseDateParam(fromParam) : defaultFrom.toISOString().slice(0, 10);
@@ -35,8 +46,10 @@ export async function handleGetEntries(req: Request, env: Env, ident: Identity):
   }
 }
 
-export async function handleGetTodayEntry(_req: Request, env: Env, ident: Identity): Promise<Response> {
-  const today = todayInTz("UTC");
+export async function handleGetTodayEntry(req: Request, env: Env, ident: Identity): Promise<Response> {
+  const tzParam = new URL(req.url).searchParams.get("tz");
+  const tz = tzParam && isValidTz(tzParam) ? tzParam : "UTC";
+  const today = todayInTz(tz);
   const entry = await getEntryByDate(env.DB, ident.email, today);
   return json(200, entry);
 }
