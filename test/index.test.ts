@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import worker from "../src/index";
-import { applyMigrations } from "./helpers";
+import { applyMigrations, seedEntry } from "./helpers";
 
 beforeEach(async () => {
   await applyMigrations();
@@ -43,6 +43,19 @@ describe("router", () => {
     const res = await worker.fetch(req, env, ctx);
     expect(res.status).toBe(200);
     await waitOnExecutionContext(ctx);
+  });
+
+  it("routes GET /api/export and returns the caller's data as a download", async () => {
+    await seedEntry("u@example.com", "2026-05-20", { mood: 4 });
+    const req = new Request("https://x/api/export");
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(req, env, ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    const body = await res.json() as any;
+    expect(body.email).toBe("u@example.com");
+    expect(body.entries.length).toBe(1);
+    expect(body.entries[0].mood).toBe(4);
   });
 
   it("returns 404 for unknown /api/* paths", async () => {

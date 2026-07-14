@@ -3,6 +3,7 @@ import { identify } from "./auth";
 import { handleGetEntries, handleGetTodayEntry, handlePutEntry } from "./entries";
 import { handleGetInsight } from "./insight";
 import { handleChat, handleGetChatHistory } from "./chat";
+import { handleExport } from "./export";
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -32,6 +33,10 @@ export default {
 
     if (url.pathname === "/api/insight" && req.method === "GET") {
       return handleGetInsight(req, env, ident);
+    }
+
+    if (url.pathname === "/api/export" && req.method === "GET") {
+      return handleExport(req, env, ident);
     }
 
     if (url.pathname === "/api/chat" && req.method === "POST") {
