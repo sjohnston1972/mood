@@ -1,7 +1,11 @@
 name = "mood-tracker"
 main = "src/index.ts"
 compatibility_date = "2026-05-01"
-compatibility_flags = ["nodejs_compat"]
+
+# Only serve on the Access-protected custom domain. Without this, the Worker is
+# also reachable at mood-tracker.<subdomain>.workers.dev, which Access does NOT
+# gate — bypassing the MFA policy entirely.
+workers_dev = false
 
 [assets]
 directory = "./public"
@@ -23,6 +27,10 @@ binding = "AI"
 [vars]
 ACCESS_TEAM_DOMAIN = "clydeford.cloudflareaccess.com"
 ACCESS_AUD = "a2cabf22b57c29a158f06264da430458f519c589a36166a5a53dc7f685368ec4"
+# Disables the DEV_FAKE_EMAIL auth fallback in production.
+ENVIRONMENT = "production"
+# Only this verified email may use the app (defence-in-depth over the Access policy).
+OWNER_EMAILS = "stevie.johnston@gmail.com"
 
 [[routes]]
 pattern = "mood.clydeford.net"

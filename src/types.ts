@@ -7,6 +7,11 @@ export interface Env {
   ASSETS: Fetcher;
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
+  // "production" disables the DEV_FAKE_EMAIL auth fallback. Unset/other = local dev.
+  ENVIRONMENT?: string;
+  // Optional comma-separated allowlist of emails permitted to use the app.
+  // When set, a validly-signed JWT whose email is not listed is rejected.
+  OWNER_EMAILS?: string;
   DEV_FAKE_EMAIL?: string;
 }
 

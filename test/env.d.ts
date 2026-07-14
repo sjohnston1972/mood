@@ -8,6 +8,8 @@ declare module "cloudflare:test" {
     ASSETS: Fetcher;
     ACCESS_TEAM_DOMAIN: string;
     ACCESS_AUD: string;
+    ENVIRONMENT?: string;
+    OWNER_EMAILS?: string;
     DEV_FAKE_EMAIL?: string;
   }
 }
