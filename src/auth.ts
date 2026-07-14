@@ -16,10 +16,12 @@ function b64urlDecodeJson<T>(s: string): T {
   return JSON.parse(new TextDecoder().decode(b64urlDecode(s))) as T;
 }
 
-async function loadJwks(env: Env): Promise<JwkRsa[]> {
-  const cached = await env.KV.get("jwks", "json") as { keys: JwkRsa[]; fetched_at: number } | null;
+async function loadJwks(env: Env, force = false): Promise<JwkRsa[]> {
   const now = Math.floor(Date.now() / 1000);
-  if (cached && now - cached.fetched_at < 3600) return cached.keys;
+  if (!force) {
+    const cached = await env.KV.get("jwks", "json") as { keys: JwkRsa[]; fetched_at: number } | null;
+    if (cached && now - cached.fetched_at < 3600) return cached.keys;
+  }
   const url = `https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`;
   const res = await fetch(url);
   if (!res.ok) throw new AuthError(`JWKS fetch failed: ${res.status}`);
@@ -46,8 +48,13 @@ export async function verifyAccessJwt(env: Env, token: string): Promise<Identity
   }
   if (header.alg !== "RS256") throw new AuthError("unsupported alg");
 
-  const keys = await loadJwks(env);
-  const jwk = keys.find((k) => k.kid === header.kid);
+  let keys = await loadJwks(env);
+  let jwk = keys.find((k) => k.kid === header.kid);
+  if (!jwk) {
+    // Key may have been rotated since the cache was written; force a refetch once.
+    keys = await loadJwks(env, true);
+    jwk = keys.find((k) => k.kid === header.kid);
+  }
   if (!jwk) throw new AuthError("unknown signing key");
 
   const cryptoKey = await crypto.subtle.importKey(
@@ -67,6 +74,11 @@ export async function verifyAccessJwt(env: Env, token: string): Promise<Identity
   if (!auds.includes(env.ACCESS_AUD)) throw new AuthError("bad aud");
   if (!claims.email) throw new AuthError("no email claim");
 
+  if (env.OWNER_EMAILS && env.OWNER_EMAILS.trim() !== "") {
+    const allowed = env.OWNER_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter((e) => e !== "");
+    if (!allowed.includes(claims.email.toLowerCase())) throw new AuthError("email not allowed");
+  }
+
   return { email: claims.email };
 }
 
@@ -76,6 +88,6 @@ export async function identify(req: Request, env: Env): Promise<Identity | null>
     try { return await verifyAccessJwt(env, token); }
     catch { return null; }
   }
-  if (env.DEV_FAKE_EMAIL) return { email: env.DEV_FAKE_EMAIL };
+  if (env.DEV_FAKE_EMAIL && env.ENVIRONMENT !== "production") return { email: env.DEV_FAKE_EMAIL };
   return null;
 }
