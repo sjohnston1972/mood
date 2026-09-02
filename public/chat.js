@@ -60,29 +60,43 @@ async function sendMessage(message) {
   if (!res.ok || !res.body) { li.textContent = "Sorry, something went wrong."; return; }
 
   li.textContent = "";
+  let received = "";
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf("\n\n")) !== -1) {
-      const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
-      const line = event.split("\n").find(l => l.startsWith("data: "));
-      if (!line) continue;
-      const payload = line.slice(6).trim();
-      if (payload === "[DONE]") return;
-      try {
-        const obj = JSON.parse(payload);
-        if (obj.response) {
-          li.textContent += obj.response;
-          log.scrollTop = log.scrollHeight;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const line = event.split("\n").find(l => l.startsWith("data: "));
+        if (!line) continue;
+        const payload = line.slice(6).trim();
+        if (payload === "[DONE]") {
+          if (!received) li.textContent = "Sorry, something went wrong.";
+          return;
         }
-      } catch { /* ignore */ }
+        try {
+          const obj = JSON.parse(payload);
+          if (obj.response) {
+            received += obj.response;
+            li.textContent += obj.response;
+            log.scrollTop = log.scrollHeight;
+          }
+        } catch { /* ignore */ }
+      }
     }
+  } catch (e) {
+    console.error(e);
+    if (!received) li.textContent = "Sorry, something went wrong.";
+    return;
   }
+  // Stream ended without a [DONE] marker and without any text — don't leave
+  // the placeholder looking like a reply is still coming.
+  if (!received) li.textContent = "Sorry, something went wrong.";
 }
 
 function startNewChat() {

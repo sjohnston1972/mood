@@ -39,10 +39,20 @@ export async function handleChat(req: Request, env: Env, ident: Identity, ctx: E
     if (e instanceof ValidationError) return json(400, { error: e.message });
     throw e;
   }
-  await insertChatTurn(env.DB, ident.email, parsed.session_id, "user", parsed.message);
 
+  // Note: the user turn is deliberately NOT persisted here. It's written
+  // together with the assistant turn in the persist branch below, once we
+  // know the model actually produced a reply — this avoids ever leaving the
+  // conversation on a lone, unanswered user turn (see #14).
   const messages = await buildMessages(env, ident.email, parsed.session_id, parsed.message);
-  const aiStream = await streamChat(env.AI, messages);
+
+  let aiStream: ReadableStream;
+  try {
+    aiStream = await streamChat(env.AI, messages);
+  } catch (e) {
+    console.error("chat stream failed to start", e);
+    return json(502, { error: "The assistant is unavailable right now. Please try again." });
+  }
 
   const [forClient, forPersist] = aiStream.tee();
 
@@ -51,25 +61,35 @@ export async function handleChat(req: Request, env: Env, ident: Identity, ctx: E
     const dec = new TextDecoder();
     let buf = "";
     let full = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
-        const line = event.split("\n").find(l => l.startsWith("data: "));
-        if (!line) continue;
-        const payload = line.slice(6).trim();
-        if (payload === "[DONE]") continue;
-        try {
-          const obj = JSON.parse(payload) as { response?: string };
-          if (obj.response) full += obj.response;
-        } catch { /* tolerate */ }
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          const line = event.split("\n").find(l => l.startsWith("data: "));
+          if (!line) continue;
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") continue;
+          try {
+            const obj = JSON.parse(payload) as { response?: string };
+            if (obj.response) full += obj.response;
+          } catch { /* tolerate */ }
+        }
       }
+    } catch (e) {
+      console.error("chat stream failed mid-response", e);
     }
     if (full.length > 0) {
+      // Write both turns together — either the pair lands, or neither does.
+      await insertChatTurn(env.DB, ident.email, parsed.session_id, "user", parsed.message);
       await insertChatTurn(env.DB, ident.email, parsed.session_id, "assistant", full);
+    } else {
+      console.error("chat produced no assistant output; user turn not persisted", {
+        session_id: parsed.session_id,
+      });
     }
   })().catch((e) => console.error("chat persist failed", e)));
 
