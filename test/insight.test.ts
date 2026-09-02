@@ -24,14 +24,19 @@ function daysAgo(n: number): string {
 }
 
 describe("runInsightJob", () => {
-  it("writes a non-NONE insight to D1 and KV", async () => {
+  it("writes a non-NONE insight to D1 and KV with a TTL", async () => {
     await seedEntry(EMAIL, daysAgo(1));
     mockAi("Sleep dipped Wed.");
+    const putSpy = vi.spyOn(env.KV, "put");
     await runInsightJob(env, EMAIL);
     const row = await env.DB.prepare("SELECT text FROM insights WHERE email=?").bind(EMAIL).first<{ text: string }>();
     expect(row?.text).toBe("Sleep dipped Wed.");
     const kv = await env.KV.get(`insight:${EMAIL}`, "json") as any;
     expect(kv.text).toBe("Sleep dipped Wed.");
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    const [, , opts] = putSpy.mock.calls[0];
+    expect((opts as any)?.expirationTtl).toBeGreaterThan(0);
+    putSpy.mockRestore();
   });
 
   it("writes nothing when AI returns NONE", async () => {
@@ -91,5 +96,35 @@ describe("handleGetInsight", () => {
   it("returns null when nothing exists", async () => {
     const res = await handleGetInsight(new Request("https://x/api/insight"), env, { email: EMAIL });
     expect(await res.json()).toBeNull();
+  });
+
+  it("rejects a stale KV-cached insight on age even though KV still returns it (no TTL expiry involved)", async () => {
+    // 30 days old — well past the freshness window — but KV.get still
+    // happily returns it since we never gave it a chance to expire. This
+    // proves the age check on read, independently of the KV TTL.
+    const staleDate = daysAgo(30);
+    await env.KV.put(`insight:${EMAIL}`, JSON.stringify({ date: staleDate, text: "ancient news" }));
+    const raw = await env.KV.get(`insight:${EMAIL}`, "json") as any;
+    expect(raw?.text).toBe("ancient news"); // sanity: KV really is still serving it
+
+    const res = await handleGetInsight(new Request("https://x/api/insight"), env, { email: EMAIL });
+    expect(await res.json()).toBeNull();
+  });
+
+  it("rejects a stale D1 insight on age when KV is empty", async () => {
+    const staleDate = daysAgo(30);
+    await env.DB.prepare(
+      "INSERT INTO insights (email,date,text,created_at) VALUES (?,?,?,?)"
+    ).bind(EMAIL, staleDate, "ancient db news", Math.floor(Date.now() / 1000)).run();
+    const res = await handleGetInsight(new Request("https://x/api/insight"), env, { email: EMAIL });
+    expect(await res.json()).toBeNull();
+  });
+
+  it("still returns an insight within the freshness window", async () => {
+    const freshDate = daysAgo(1);
+    await env.KV.put(`insight:${EMAIL}`, JSON.stringify({ date: freshDate, text: "still fresh" }));
+    const res = await handleGetInsight(new Request("https://x/api/insight"), env, { email: EMAIL });
+    const body = await res.json() as any;
+    expect(body.text).toBe("still fresh");
   });
 });
