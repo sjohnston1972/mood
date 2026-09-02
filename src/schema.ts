@@ -17,7 +17,7 @@ function assertIntInRange(v: unknown, name: string, lo: number, hi: number): ass
   assert(v >= lo && v <= hi, `${name} must be in ${lo}..${hi}`);
 }
 
-function isValidTz(tz: string): boolean {
+export function isValidTz(tz: string): boolean {
   try {
     new Intl.DateTimeFormat("en", { timeZone: tz });
     return true;

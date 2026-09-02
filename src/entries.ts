@@ -1,5 +1,5 @@
 import type { Env, Identity } from "./types";
-import { parseEntryInput, parseDateParam, ValidationError } from "./schema";
+import { parseEntryInput, parseDateParam, isValidTz, ValidationError } from "./schema";
 import { listEntries, getEntryByDate, upsertEntry } from "./db";
 import { runInsightJob } from "./insight";
 
@@ -35,8 +35,11 @@ export async function handleGetEntries(req: Request, env: Env, ident: Identity):
   }
 }
 
-export async function handleGetTodayEntry(_req: Request, env: Env, ident: Identity): Promise<Response> {
-  const today = todayInTz("UTC");
+export async function handleGetTodayEntry(req: Request, env: Env, ident: Identity): Promise<Response> {
+  const url = new URL(req.url);
+  const tzParam = url.searchParams.get("tz");
+  const tz = tzParam && isValidTz(tzParam) ? tzParam : "UTC";
+  const today = todayInTz(tz);
   const entry = await getEntryByDate(env.DB, ident.email, today);
   return json(200, entry);
 }
