@@ -192,8 +192,14 @@ nav#tabs .tab.active { background: var(--card); color: var(--ink); border: 1px s
 #chat-panel header { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
 #chat-panel h2 { margin: 0; font-size: 15px; font-weight: 600; }
 #chat-panel[hidden] { display: none !important; }
-#chat-close {
+#chat-new {
   margin-left: auto; background: none; border: none; cursor: pointer;
+  padding: 6px 10px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--muted); touch-action: manipulation;
+}
+#chat-new:hover, #chat-new:active { background: #f0ede2; color: var(--ink); }
+#chat-close {
+  background: none; border: none; cursor: pointer;
   width: 32px; height: 32px; min-width: 32px; min-height: 32px;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 22px; line-height: 1; color: var(--muted);

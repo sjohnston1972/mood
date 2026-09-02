@@ -1,6 +1,7 @@
 const fab = document.getElementById("chat-fab");
 const panel = document.getElementById("chat-panel");
 const closeBtn = document.getElementById("chat-close");
+const newChatBtn = document.getElementById("chat-new");
 const log = document.getElementById("chat-log");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("chat-input");
@@ -84,6 +85,15 @@ async function sendMessage(message) {
   }
 }
 
+function startNewChat() {
+  sessionId = crypto.randomUUID();
+  localStorage.setItem(SESSION_KEY, sessionId);
+  log.innerHTML = "";
+  // The new session has no history yet, so there's nothing to load.
+  historyLoaded = true;
+  input.focus();
+}
+
 export async function openChatWithMessage(message) {
   if (!panel || !log) return;
   panel.hidden = false;
@@ -105,6 +115,9 @@ export function mountChat() {
     panel.hidden = true;
     fab.classList.remove("hidden");
   });
+  if (newChatBtn) {
+    newChatBtn.addEventListener("click", startNewChat);
+  }
 
   // Prevent the send button from stealing focus from the input on desktop.
   // (Don't preventDefault touchstart — that also cancels the click on mobile.)
