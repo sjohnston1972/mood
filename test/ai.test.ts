@@ -15,19 +15,36 @@ describe("chatComplete", () => {
 
   it("falls back to the small model on primary failure", async () => {
     let calls = 0;
+    const primaryError = new Error("boom");
     const ai = makeAi(async (model) => {
       calls++;
-      if (model === "@cf/meta/llama-3.3-70b-instruct-fp8-fast") throw new Error("boom");
+      if (model === "@cf/meta/llama-3.3-70b-instruct-fp8-fast") throw primaryError;
       return { response: "fallback ok" };
     });
-    const out = await chatComplete(ai, [{ role: "user", content: "hi" }]);
-    expect(out).toBe("fallback ok");
-    expect(calls).toBe(2);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const out = await chatComplete(ai, [{ role: "user", content: "hi" }]);
+      expect(out).toBe("fallback ok");
+      expect(calls).toBe(2);
+      expect(errSpy).toHaveBeenCalledTimes(1);
+      const [message, loggedError] = errSpy.mock.calls[0];
+      expect(String(message)).toContain("@cf/meta/llama-3.3-70b-instruct-fp8-fast");
+      expect(String(message)).toContain("@cf/meta/llama-3.1-8b-instruct");
+      expect(loggedError).toBe(primaryError);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it("throws when both models fail", async () => {
     const ai = makeAi(async () => { throw new Error("nope"); });
-    await expect(chatComplete(ai, [{ role: "user", content: "hi" }])).rejects.toThrow();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(chatComplete(ai, [{ role: "user", content: "hi" }])).rejects.toThrow();
+      expect(errSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });
 

@@ -14,7 +14,8 @@ async function runWithFallback(
 ): Promise<unknown> {
   try {
     return await ai.run(PRIMARY as any, { messages, ...opts });
-  } catch {
+  } catch (e) {
+    console.error(`primary model (${PRIMARY}) failed, falling back to ${FALLBACK}`, e);
     return await ai.run(FALLBACK as any, { messages, ...opts });
   }
 }
