@@ -83,3 +83,9 @@ export async function getLatestInsight(
   ).bind(email).first<Insight>();
   return row ?? null;
 }
+
+export async function deleteInsightsForEmail(
+  db: D1Database, email: string,
+): Promise<void> {
+  await db.prepare(`DELETE FROM insights WHERE email = ?`).bind(email).run();
+}

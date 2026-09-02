@@ -1,5 +1,5 @@
 import type { Env, Identity } from "./types";
-import { listEntries, upsertInsight, getLatestInsight } from "./db";
+import { listEntries, upsertInsight, getLatestInsight, deleteInsightsForEmail } from "./db";
 import { generateInsight } from "./ai";
 
 function todayUtc(): string { return new Date().toISOString().slice(0, 10); }
@@ -12,7 +12,13 @@ export async function runInsightJob(env: Env, email: string): Promise<void> {
   const entries = await listEntries(env.DB, email, daysAgoUtc(14), todayUtc());
   if (entries.length === 0) return;
   const text = await generateInsight(env.AI, entries);
-  if (!text) return;
+  if (!text) {
+    // Nothing notable today — clear any previously stored insight so a stale
+    // observation doesn't keep showing.
+    await deleteInsightsForEmail(env.DB, email);
+    await env.KV.delete(`insight:${email}`);
+    return;
+  }
   const today = todayUtc();
   await upsertInsight(env.DB, email, today, text);
   await env.KV.put(`insight:${email}`, JSON.stringify({ date: today, text }));
