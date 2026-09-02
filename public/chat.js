@@ -5,10 +5,18 @@ const log = document.getElementById("chat-log");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("chat-input");
 
+const SESSION_KEY = "mood-chat-session-id";
+
 let sessionId = null;
 
 function ensureSession() {
-  if (!sessionId) sessionId = crypto.randomUUID();
+  if (!sessionId) {
+    sessionId = localStorage.getItem(SESSION_KEY);
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem(SESSION_KEY, sessionId);
+    }
+  }
   return sessionId;
 }
 
@@ -97,5 +105,5 @@ export function mountChat() {
     finally { input.focus(); }
   });
 
-  sessionId = crypto.randomUUID();
+  ensureSession();
 }
