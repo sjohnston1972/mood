@@ -29,6 +29,23 @@ function appendMessage(role, text) {
   return li;
 }
 
+let historyLoaded = false;
+
+async function loadHistory() {
+  if (historyLoaded) return;
+  historyLoaded = true;
+  try {
+    const session_id = ensureSession();
+    const res = await fetch(`/api/chat/${encodeURIComponent(session_id)}`);
+    if (!res.ok) return;
+    const turns = await res.json();
+    for (const turn of turns) appendMessage(turn.role, turn.content);
+  } catch (e) {
+    console.error(e);
+    // Don't block sending new messages just because history failed to load.
+  }
+}
+
 async function sendMessage(message) {
   const session_id = ensureSession();
   appendMessage("user", message);
@@ -72,15 +89,17 @@ export async function openChatWithMessage(message) {
   panel.hidden = false;
   fab.classList.add("hidden");
   log.scrollTop = log.scrollHeight;
+  await loadHistory();
   try { await sendMessage(message); }
   catch (e) { console.error(e); appendMessage("assistant", "Sorry, something went wrong."); }
 }
 
 export function mountChat() {
-  fab.addEventListener("click", () => {
+  fab.addEventListener("click", async () => {
     panel.hidden = false;
     fab.classList.add("hidden");
     setTimeout(() => input.focus(), 50);
+    await loadHistory();
   });
   closeBtn.addEventListener("click", () => {
     panel.hidden = true;
